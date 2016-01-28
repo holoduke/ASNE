@@ -6,7 +6,7 @@ android {
         }
     }
     compileSdkVersion 21
-    buildToolsVersion '21.1.1'
+    buildToolsVersion "23.0.2"
     defaultConfig {
         minSdkVersion 10
         targetSdkVersion 21
@@ -15,7 +15,7 @@ android {
     }
     buildTypes {
         release {
-            runProguard false
+            minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.txt'
         }
     }
@@ -36,4 +36,3 @@ dependencies {
     compile project(':facebook')
     compile project(':instagram')
 }
-
