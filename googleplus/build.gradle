@@ -12,5 +12,5 @@ android {
 
 dependencies {
     compile project(':ASNECore')
-    compile 'com.google.android.gms:play-services-plus:7.5.0'
+    compile 'com.google.android.gms:play-services-plus:8.4.0'
 }
