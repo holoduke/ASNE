@@ -5,8 +5,7 @@ android {
         config {
         }
     }
-    compileSdkVersion 23
-    buildToolsVersion '23.0.2'
+
     defaultConfig {
         minSdkVersion 15
         targetSdkVersion 23
@@ -36,4 +35,3 @@ dependencies {
     compile project(':facebook')
     compile project(':instagram')
 }
-

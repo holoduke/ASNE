@@ -3,7 +3,7 @@ apply plugin: 'com.android.library'
 android {
 <<<<<<< HEAD
     compileSdkVersion 21
-    buildToolsVersion '22.0.1'
+    buildToolsVersion '23.0.2'
 
     defaultConfig {
         minSdkVersion 11
@@ -36,5 +36,5 @@ dependencies {
     compile('com.google.android.gms:play-services:6.5.+@aar') { exclude module: 'support-v4' }
 >>>>>>> 91bf48d9fc2560400bc6210eb95a8eb68a76920f
     compile project(':ASNECore')
-    compile 'com.google.android.gms:play-services-plus:7.5.0'
+    compile 'com.google.android.gms:play-services-plus:8.4.0'
 }
