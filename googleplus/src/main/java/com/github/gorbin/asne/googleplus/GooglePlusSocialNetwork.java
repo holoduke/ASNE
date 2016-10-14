@@ -21,6 +21,7 @@
  *******************************************************************************/
 package com.github.gorbin.asne.googleplus;
 
+import android.content.Context;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
@@ -87,6 +88,10 @@ public class GooglePlusSocialNetwork extends SocialNetwork implements GoogleApiC
     private ConnectionResult mConnectionResult;
     private boolean mConnectRequested;
     private Handler mHandler = new Handler();
+
+    public GooglePlusSocialNetwork(Fragment fragment, Context context) {
+        super(fragment, context);
+    }
 
     public GooglePlusSocialNetwork(Fragment fragment, Context context) {
         super(fragment, context);
@@ -491,9 +496,9 @@ public class GooglePlusSocialNetwork extends SocialNetwork implements GoogleApiC
                         } else {
                             if (mLocalListeners.get(REQUEST_GET_FRIENDS) != null) {
                                 ((OnRequestGetFriendsCompleteListener) mLocalListeners.get(REQUEST_GET_FRIENDS))
-                                        .OnGetFriendsIdComplete(getID(), ids.toArray(new String[ids.size()]));
+                                        .onGetFriendsIdComplete(getID(), ids.toArray(new String[ids.size()]));
                                 ((OnRequestGetFriendsCompleteListener) mLocalListeners.get(REQUEST_GET_FRIENDS))
-                                        .OnGetFriendsComplete(getID(), socialPersons);
+                                        .onGetFriendsComplete(getID(), socialPersons);
                                 mLocalListeners.remove(REQUEST_GET_FRIENDS);
                             }
                         }
@@ -580,7 +585,7 @@ public class GooglePlusSocialNetwork extends SocialNetwork implements GoogleApiC
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        int sanitizedRequestCode = requestCode % 0x10000;
+        int sanitizedRequestCode = requestCode & 0xFFFF;
         if (sanitizedRequestCode == REQUEST_AUTH) {
             if (resultCode == Activity.RESULT_OK && !googleApiClient.isConnected() && !googleApiClient.isConnecting()) {
                 // This time, connect should succeed.

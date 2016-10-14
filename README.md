@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 MODIFIED VERSION OF ASNE 
 
 Differences
@@ -154,6 +155,11 @@ if (socialNetwork != null && logged_in_network != -1 && socialNetwork.isConnecte
 
 
 
+=======
+Unfreeze project - merge all puls for master branch - current version was not tested - **NOT STABLE**
+
+**Sorry, but I freeze work on project for some time(I hope not long, nearly month) - too busy. I saw all Issues and will resolve them as soon as I can.** 
+>>>>>>> 91bf48d9fc2560400bc6210eb95a8eb68a76920f
 
 
 ![enter image description here][1]
@@ -293,6 +299,8 @@ mSocialNetworkManager = (SocialNetworkManager) getFragmentManager().findFragment
 	if (mSocialNetworkManager == null) {
         mSocialNetworkManager = new SocialNetworkManager();
 		FacebookSocialNetwork fbNetwork = new FacebookSocialNetwork(this, fbScope);
+		//or from an activity
+		//FacebookSocialNetwork fbNetwork = new FacebookSocialNetwork(mSocialNetworkManager, this, fbScope);
         mSocialNetworkManager.addSocialNetwork(fbNetwork);
         getFragmentManager().beginTransaction().add(mSocialNetworkManager, SOCIAL_NETWORK_TAG).commit();
 	}

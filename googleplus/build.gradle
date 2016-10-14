@@ -1,16 +1,40 @@
 apply plugin: 'com.android.library'
 
 android {
+<<<<<<< HEAD
     compileSdkVersion 21
     buildToolsVersion '22.0.1'
 
     defaultConfig {
         minSdkVersion 11
         targetSdkVersion 21
+=======
+    compileSdkVersion 23
+    buildToolsVersion "21.1.1"
+
+    defaultConfig {
+        //applicationId "com.github.gorbin.asne.googleplus"
+        minSdkVersion 15
+        targetSdkVersion 23
+        versionCode 1
+        versionName "1.0"
+    }
+    buildTypes {
+        release {
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+>>>>>>> 91bf48d9fc2560400bc6210eb95a8eb68a76920f
     }
 }
 
 dependencies {
+<<<<<<< HEAD
+=======
+    compile fileTree(dir: 'libs', include: ['*.jar'])
+    compile 'com.android.support:appcompat-v7:23.1.1'
+    compile('com.google.android.gms:play-services:6.5.+@aar') { exclude module: 'support-v4' }
+>>>>>>> 91bf48d9fc2560400bc6210eb95a8eb68a76920f
     compile project(':ASNECore')
     compile 'com.google.android.gms:play-services-plus:7.5.0'
 }
