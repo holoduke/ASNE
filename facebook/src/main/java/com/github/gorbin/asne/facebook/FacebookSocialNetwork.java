@@ -49,6 +49,7 @@ import com.github.gorbin.asne.core.SocialNetwork;
 import com.github.gorbin.asne.core.SocialNetworkException;
 import com.github.gorbin.asne.core.listener.OnCheckIsFriendCompleteListener;
 import com.github.gorbin.asne.core.listener.OnLoginCompleteListener;
+import com.github.gorbin.asne.core.listener.OnLogoutCompleteListener;
 import com.github.gorbin.asne.core.listener.OnPostingCompleteListener;
 import com.github.gorbin.asne.core.listener.OnRequestAccessTokenCompleteListener;
 import com.github.gorbin.asne.core.listener.OnRequestAddFriendCompleteListener;
@@ -224,8 +225,9 @@ public class FacebookSocialNetwork extends SocialNetwork {
      * Logout from Facebook social network
      */
     @Override
-    public void logout() {
+    public void logout(OnLogoutCompleteListener completeListener) {
         LoginManager.getInstance().logOut();
+        if (completeListener != null) completeListener.onLogoutSuccess(ID);
     }
 
     /**

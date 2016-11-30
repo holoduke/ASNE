@@ -24,6 +24,7 @@ package com.github.gorbin.asne.core;
 import android.content.Intent;
 import android.os.Bundle;
 import android.support.v4.app.Fragment;
+import android.util.Log;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -167,6 +168,7 @@ public class SocialNetworkManager extends Fragment {
      * @param socialNetwork chosen and setuped social network
      */
     public void addSocialNetwork(SocialNetwork socialNetwork) {
+        Log.d(TAG, "add social network "+socialNetwork.getID());
         if (mSocialNetworksMap.get(socialNetwork.getID()) != null) {
             throw new SocialNetworkException("Social network with id = " + socialNetwork.getID() + " already exists");
         }

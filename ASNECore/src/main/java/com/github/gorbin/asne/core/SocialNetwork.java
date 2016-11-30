@@ -30,6 +30,7 @@ import android.support.v4.app.Fragment;
 import android.util.Log;
 
 import com.github.gorbin.asne.core.listener.OnCheckIsFriendCompleteListener;
+import com.github.gorbin.asne.core.listener.OnLogoutCompleteListener;
 import com.github.gorbin.asne.core.listener.OnRequestAccessTokenCompleteListener;
 import com.github.gorbin.asne.core.listener.OnLoginCompleteListener;
 import com.github.gorbin.asne.core.listener.OnPostingCompleteListener;
@@ -127,15 +128,6 @@ public abstract class SocialNetwork {
         mSharedPreferences = context.getSharedPreferences(SHARED_PREFERENCES_NAME, Context.MODE_PRIVATE);
     }
 
-    /**
-     * @param socialMediaManager the SocialMediaManager fragment.
-     * @param context ant Activity or Application if not being called from a fragment
-     */
-    protected SocialNetwork(Fragment socialMediaManager, Context context) {
-        //we keep the fragment in case it is needed in future. it also minimises the changes required.
-        mSocialNetworkManager = socialMediaManager;
-        mSharedPreferences = context.getSharedPreferences(SHARED_PREFERENCES_NAME, Context.MODE_PRIVATE);
-    }
     //////////////////// LIFECYCLE ////////////////////
 
     /**
@@ -229,7 +221,7 @@ public abstract class SocialNetwork {
     /**
      * Logout from social network
      */
-    public abstract void logout();
+    public abstract void logout(OnLogoutCompleteListener completeListener);
 
     /**
      * Get id of social network
@@ -443,7 +435,7 @@ public abstract class SocialNetwork {
 
     /**
      * Get current user friends list using local listener
-     * @param onRequestGetFriendsCompleteListener listener for getting list of current user friends
+     * @param onRequestGetFriendsCompleteListener listener for getting list of curunt user friends
      */
     public void requestGetFriends(OnRequestGetFriendsCompleteListener onRequestGetFriendsCompleteListener) {
         registerListener(REQUEST_GET_FRIENDS, onRequestGetFriendsCompleteListener);
@@ -615,7 +607,7 @@ public abstract class SocialNetwork {
         }
     }
 
-    private void registerListener(String listenerID, SocialNetworkListener socialNetworkListener) {
+    protected void registerListener(String listenerID, SocialNetworkListener socialNetworkListener) {
         if (socialNetworkListener != null) {
             mLocalListeners.put(listenerID, socialNetworkListener);
         } else {

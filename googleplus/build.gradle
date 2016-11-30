@@ -15,6 +15,6 @@ android {
 
 dependencies {
     compile project(':ASNECore')
-    compile 'com.google.android.gms:play-services-plus:9.6.1'
-    //compile 'com.google.android.gms:play-services-auth:9.2.0'
+    compile 'com.google.firebase:firebase-auth:10.0.0'
+    compile 'com.google.android.gms:play-services-auth:10.0.0'
 }

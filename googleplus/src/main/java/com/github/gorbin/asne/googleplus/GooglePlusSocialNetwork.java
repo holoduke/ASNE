@@ -24,11 +24,9 @@ package com.github.gorbin.asne.googleplus;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
-import android.net.Uri;
-import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
-import android.support.v4.app.ActivityCompat;
+import android.support.annotation.NonNull;
 import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentActivity;
 import android.util.Log;
@@ -38,6 +36,7 @@ import com.github.gorbin.asne.core.SocialNetwork;
 import com.github.gorbin.asne.core.SocialNetworkException;
 import com.github.gorbin.asne.core.listener.OnCheckIsFriendCompleteListener;
 import com.github.gorbin.asne.core.listener.OnLoginCompleteListener;
+import com.github.gorbin.asne.core.listener.OnLogoutCompleteListener;
 import com.github.gorbin.asne.core.listener.OnPostingCompleteListener;
 import com.github.gorbin.asne.core.listener.OnRequestAccessTokenCompleteListener;
 import com.github.gorbin.asne.core.listener.OnRequestAddFriendCompleteListener;
@@ -47,23 +46,27 @@ import com.github.gorbin.asne.core.listener.OnRequestRemoveFriendCompleteListene
 import com.github.gorbin.asne.core.listener.OnRequestSocialPersonCompleteListener;
 import com.github.gorbin.asne.core.listener.OnRequestSocialPersonsCompleteListener;
 import com.github.gorbin.asne.core.persons.SocialPerson;
+import com.google.android.gms.auth.api.Auth;
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
+import com.google.android.gms.auth.api.signin.GoogleSignInResult;
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.api.GoogleApiClient;
-import com.google.android.gms.common.Scopes;
-import com.google.android.gms.common.api.CommonStatusCodes;
-import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.common.api.OptionalPendingResult;
 import com.google.android.gms.common.api.ResultCallback;
 import com.google.android.gms.common.api.Status;
-import com.google.android.gms.plus.People;
-import com.google.android.gms.plus.Plus;
-import com.google.android.gms.plus.PlusShare;
-import com.google.android.gms.plus.model.people.Person;
-import com.google.android.gms.plus.model.people.PersonBuffer;
+import com.google.android.gms.tasks.OnCompleteListener;
+import com.google.android.gms.tasks.Task;
+import com.google.firebase.FirebaseApp;
+import com.google.firebase.auth.AuthCredential;
+import com.google.firebase.auth.AuthResult;
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseUser;
+import com.google.firebase.auth.GoogleAuthProvider;
 
 import java.io.File;
+import java.nio.channels.AlreadyConnectedException;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
 
 /**
@@ -77,23 +80,19 @@ public class GooglePlusSocialNetwork extends SocialNetwork implements GoogleApiC
     /*** Social network ID in asne modules, should be unique*/
     public static final int ID = 3;
 
-    private static final String TAG = GooglePlusSocialNetwork.class.getSimpleName();
-    // max 16 bit to use in startActivityForResult
     private static final int REQUEST_AUTH = UUID.randomUUID().hashCode() & 0xFFFF;
-    /**
-     * googleApiClient.isConntected() works really strange, it returs false right after init and then true,
-     * so let's handle state by ourselves
-     */
-    private static final String SAVE_STATE_KEY_IS_CONNECTED = "GooglePlusSocialNetwork.SAVE_STATE_KEY_OAUTH_TOKEN";
     private static Activity mActivity;
-    private GoogleApiClient googleApiClient;
-    private ConnectionResult mConnectionResult;
-    private boolean mConnectRequested;
-    private Handler mHandler = new Handler();
     private FragmentActivity mContext;
+    private static final String TAG = "GoogleActivity";
+    private static final int RC_SIGN_IN = 9001;
+    private GoogleApiClient mGoogleApiClient;
+    private String webClientId;
 
-    public GooglePlusSocialNetwork(Fragment fragment, Context context) {
+    private GoogleSignInResult signInResult;
+
+    public GooglePlusSocialNetwork(Fragment fragment, Context context, String web_client_id) {
         super(fragment, context);
+        webClientId = web_client_id;
         mContext = (FragmentActivity)context;
     }
 
@@ -103,8 +102,41 @@ public class GooglePlusSocialNetwork extends SocialNetwork implements GoogleApiC
      */
     @Override
     public boolean isConnected() {
-        return googleApiClient.isConnecting() || googleApiClient.isConnected();
-//        return mSharedPreferences.getBoolean(SAVE_STATE_KEY_IS_CONNECTED, false);
+        Log.d(TAG,"is connected");
+        if (mGoogleApiClient == null){
+            Log.d(TAG,"cannot check is connected without api client");
+            return false;
+        }
+        return mGoogleApiClient.isConnecting() || mGoogleApiClient.isConnected();
+    }
+
+    /**
+     * Overrided for Google plus
+     * @param savedInstanceState If the activity is being re-initialized after previously being shut down then this Bundle contains the data it most recently supplied in onSaveInstanceState(Bundle). Note: Otherwise it is null.
+     */
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        Log.d(TAG,"on create");
+
+        try {
+            mActivity = mSocialNetworkManager.getActivity();
+
+            GoogleSignInOptions gso = new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                    .requestIdToken(webClientId)
+                    .build();
+
+            mGoogleApiClient = new GoogleApiClient.Builder(mActivity)
+                    .enableAutoManage(mContext /* FragmentActivity */, this /* OnConnectionFailedListener */)
+                    .addApi(Auth.GOOGLE_SIGN_IN_API, gso)
+                    .build();
+
+            Log.d(TAG,"done setting op google login service");
+        }
+        catch(Exception e){
+            Log.e(TAG, "error setting up google login service "+e.getMessage());
+        }
     }
 
     /**
@@ -113,28 +145,168 @@ public class GooglePlusSocialNetwork extends SocialNetwork implements GoogleApiC
      */
     @Override
     public void requestLogin(OnLoginCompleteListener onLoginCompleteListener) {
-        super.requestLogin(onLoginCompleteListener);
 
-        mConnectRequested = true;
+        Log.d(TAG,"request login");
+
+        //already logged in scenarios
+        if (isConnected() && signInResult != null){
+            Log.d(TAG,"already connected and signin result known");
+            onLoginCompleteListener.onLoginSuccess(ID);
+            return;
+        }
+        else if (isConnected()){
+            Log.d(TAG,"already connected");
+            silentLogin(onLoginCompleteListener);
+            return;
+        }
+
+        forceRegularLogin(onLoginCompleteListener);
+    }
+
+    private void forceRegularLogin(OnLoginCompleteListener onLoginCompleteListener){
+        if (mGoogleApiClient == null){
+            Log.d(TAG,"cannot login in. no google api client");
+            onLoginCompleteListener.onError(ID,"500","no_google_api_client_found",null);
+            return;
+        }
+
+        registerListener(REQUEST_LOGIN, onLoginCompleteListener); //register for later use in activity result
+
+        Intent signInIntent = Auth.GoogleSignInApi.getSignInIntent(mGoogleApiClient);
+        mActivity.startActivityForResult(signInIntent, RC_SIGN_IN);
+    }
+
+
+    private void silentLogin(final OnLoginCompleteListener onLoginCompleteListener){
+        Log.d(TAG,"silent login");
+
         try {
-            mConnectionResult.startResolutionForResult(mActivity, REQUEST_AUTH);
-        } catch (Exception e) {
-            if (!googleApiClient.isConnecting()) {
-                googleApiClient.connect();
+            OptionalPendingResult<GoogleSignInResult> pendingResult =
+                    Auth.GoogleSignInApi.silentSignIn(mGoogleApiClient);
+
+            pendingResult.setResultCallback(new ResultCallback<GoogleSignInResult>() {
+                @Override
+                public void onResult(@NonNull GoogleSignInResult googleSignInResult) {
+
+                    Log.d(TAG, " on result called silent shit " + googleSignInResult.getStatus());
+
+                    if (googleSignInResult.isSuccess()) {
+                        Log.d(TAG, "jaaa is goed");
+                        Log.d(TAG, " on result called silent shit " + googleSignInResult.getSignInAccount().getDisplayName());
+                        signInResult = googleSignInResult;
+                        onLoginCompleteListener.onLoginSuccess(ID);
+                    } else {
+                        Log.d(TAG, "Damn, you cant be logged in silently man. you need to really login");
+                        forceRegularLogin(onLoginCompleteListener);
+                    }
+                }
+            });
+        }
+        catch(Exception e){
+            Log.e(TAG,"critical error silent loggin "+e.getMessage());
+        }
+    }
+
+
+    @Override
+    public void onStart() {
+    }
+
+    @Override
+    public void onStop() {
+
+    }
+
+    private Intent loginIntentData;
+    /**
+     * Overrided for Google plus
+     * @param requestCode The integer request code originally supplied to startActivityForResult(), allowing you to identify who this result came from.
+     * @param resultCode The integer result code returned by the child activity through its setResult().
+     * @param data An Intent, which can return result data to the caller (various data can be attached to Intent "extras").
+     */
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+
+        GoogleSignInResult result = Auth.GoogleSignInApi.getSignInResultFromIntent(data);
+
+        if (result.isSuccess()){
+
+            if (mLocalListeners.get(REQUEST_LOGIN) != null) {
+                ((OnLoginCompleteListener) mLocalListeners.get(REQUEST_LOGIN)).onLoginSuccess(getID());
+            }
+            else{
+                Log.e(TAG,"no listeners registered for logging in result");
             }
         }
+        else{
+            mLocalListeners.get(REQUEST_LOGIN).onError(getID(), REQUEST_LOGIN, "error_logging_in", null);
+        }
+    }
+
+    /**
+     * After calling connect(), this method will be invoked asynchronously when the connect request has successfully completed.
+     * @param bundle Bundle of data provided to clients by Google Play services. May be null if no content is provided by the service.
+     */
+    @Override
+    public void onConnected(Bundle bundle) {
+
+    }
+
+    /**
+     * Called when the client is temporarily in a disconnected state.
+     * @param i The reason for the disconnection. Defined by constants CAUSE_*.
+     */
+    @Override
+    public void onConnectionSuspended(int i) {
+        if (mLocalListeners.get(REQUEST_LOGIN) != null) {
+            mLocalListeners.get(REQUEST_LOGIN).onError(getID(), REQUEST_LOGIN,
+                    "get person == null", null);
+        }
+    }
+
+    /**
+     * Called when the client is disconnected.
+     */
+    public void onDisconnected() {
+
+    }
+
+    @Override
+    public void onConnectionFailed(ConnectionResult result) {
+
     }
 
     /**
      * Logout from Google plus social network
      */
     @Override
-    public void logout() {
-        mConnectRequested = false;
+    public void logout(final OnLogoutCompleteListener completeListener) {
+        Log.d(TAG,"logout");
+        if (mGoogleApiClient == null){
+            Log.e(TAG,"cannot sign out without api client");
+            return;
+        }
 
-        if (googleApiClient != null && googleApiClient.isConnected()) {
-            mSharedPreferences.edit().remove(SAVE_STATE_KEY_IS_CONNECTED).commit();
-            googleApiClient.disconnect();
+        try {
+            Auth.GoogleSignInApi.signOut(mGoogleApiClient).setResultCallback(
+                    new ResultCallback<Status>() {
+                        @Override
+                        public void onResult(Status status) {
+                            Log.d(TAG, "signed out");
+                            Auth.GoogleSignInApi.revokeAccess(mGoogleApiClient).setResultCallback(
+                                    new ResultCallback<Status>() {
+                                        @Override
+                                        public void onResult(Status status) {
+                                            if (completeListener != null) {
+                                                completeListener.onLogoutSuccess(ID);
+                                            }
+                                        }
+                                    });
+                        }
+                    });
+        }
+        catch (Exception e){
+            Log.e(TAG,"error signing out "+e.getMessage());
         }
     }
 
@@ -152,7 +324,8 @@ public class GooglePlusSocialNetwork extends SocialNetwork implements GoogleApiC
      */
     @Override
     public AccessToken getAccessToken() {
-        throw new SocialNetworkException("Not supported for GooglePlusSocialNetwork");
+
+        throw new SocialNetworkException("requestPostMessage isn't allowed for GooglePlusSocialNetwork");
     }
 
     /**
@@ -160,76 +333,19 @@ public class GooglePlusSocialNetwork extends SocialNetwork implements GoogleApiC
      * @param onRequestAccessTokenCompleteListener listener for {@link com.github.gorbin.asne.core.AccessToken} request
      */
     @Override
-    public void requestAccessToken(OnRequestAccessTokenCompleteListener onRequestAccessTokenCompleteListener) {
-        super.requestAccessToken(onRequestAccessTokenCompleteListener);
-
-        AsyncTask<Activity, Void, String> task = new AsyncTask<Activity, Void, String>() {
-            Exception mException;
-
+    public void requestAccessToken(final OnRequestAccessTokenCompleteListener onRequestAccessTokenCompleteListener) {
+        silentLogin(new OnLoginCompleteListener() {
             @Override
-            protected String doInBackground(Activity... params) {
+            public void onLoginSuccess(int socialNetworkID) {
 
-                String token = "1234";
-//                googleApiClient.
-//
-//                Plus
-//
-//                googleApiClient = new GoogleApiClient.Builder(this)
-//                        .enableAutoManage(this /* FragmentActivity */,
-//                                this /* OnConnectionFailedListener */)
-//                        .addApi(Plus.API)
-//                        .addScope(Scopes.PLUS_LOGIN)
-//                        .addScope(Scopes.PROFILE)
-//                        .addScope(Scopes.PLUS_ME)
-//                        .build();
-//
-//
-//                GoogleSignInOptions gso = new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-//                        .requestIdToken("XXXX") //fill this with reference to string value of web client OAuth 2.0 client IDs on https://console.developers.google.com/apis/
-//                        .requestEmail() //Remove these below according to your needs
-//                        .requestProfile()
-//                        .requestScopes(new Scope(Scopes.PROFILE))
-//                        .requestScopes(new Scope(Scopes.PLUS_ME))
-//                        .requestScopes(new Scope(Scopes.PLUS_LOGIN))
-//                        .build();
-//
-//                mGoogleApiClient = new GoogleApiClient.Builder(this)
-//                        .enableAutoManage(this, this)
-//                        .addApi(Auth.GOOGLE_SIGN_IN_API, gso)
-//                        .addApi(Plus.API)
-//                        .build();
-//
-//
-//
-//
-//                String scope = "oauth2:profile email";
-//                String account = Plus.AccountApi.getAccountName(googleApiClient);
-//                String token = null;
-//                try {
-//                    token = GoogleAuthUtil.getToken(params[0],
-//                            account, scope);
-//                } catch (UserRecoverableAuthException e) {
-//                    mConnectRequested = true;
-//                    mActivity.startActivityForResult(e.getIntent(), REQUEST_AUTH);
-//                } catch (Exception e) {
-//                    e.printStackTrace();
-//                    mException = e;
-//                }
-                return token;
+                onRequestAccessTokenCompleteListener.onRequestAccessTokenComplete(ID,new AccessToken(signInResult.getSignInAccount().getIdToken(),null));
             }
 
             @Override
-            protected void onPostExecute(String token) {
-                if(token != null) {
-                    ((OnRequestAccessTokenCompleteListener) mLocalListeners.get(REQUEST_ACCESS_TOKEN))
-                            .onRequestAccessTokenComplete(getID(), new AccessToken(token, null));
-                }
-                else if(mException != null) {
-                    mLocalListeners.get(REQUEST_ACCESS_TOKEN).onError(getID(), REQUEST_ACCESS_TOKEN, mException.getMessage(), mException);
-                }
+            public void onError(int socialNetworkID, String requestID, String errorMessage, Object data) {
+                onRequestAccessTokenCompleteListener.onError(ID,"500","error_fetching_current_person_not_logged_in",null);
             }
-        };
-        task.execute(mActivity);
+        });
     }
 
     /**
@@ -237,9 +353,30 @@ public class GooglePlusSocialNetwork extends SocialNetwork implements GoogleApiC
      * @param onRequestSocialPersonCompleteListener listener for {@link com.github.gorbin.asne.core.persons.SocialPerson} request
      */
     @Override
-    public void requestCurrentPerson(OnRequestSocialPersonCompleteListener onRequestSocialPersonCompleteListener) {
-        super.requestCurrentPerson(onRequestSocialPersonCompleteListener);
-        requestPerson("me", onRequestSocialPersonCompleteListener);
+    public void requestCurrentPerson(final OnRequestSocialPersonCompleteListener onRequestSocialPersonCompleteListener) {
+
+        silentLogin(new OnLoginCompleteListener() {
+            @Override
+            public void onLoginSuccess(int socialNetworkID) {
+
+                try {
+                    SocialPerson socialPerson = new SocialPerson();
+                    socialPerson.id = signInResult.getSignInAccount().getId();
+                    socialPerson.name = signInResult.getSignInAccount().getDisplayName();
+                    socialPerson.avatarURL = signInResult.getSignInAccount().getPhotoUrl().toString();
+                    onRequestSocialPersonCompleteListener.onRequestSocialPersonSuccess(ID, socialPerson);
+                }
+                catch(Exception e){
+                    Log.e(TAG,"error creating social person "+e.getMessage());
+                    onRequestSocialPersonCompleteListener.onError(ID,"500","error_creating_social_person",null);
+                }
+            }
+
+            @Override
+            public void onError(int socialNetworkID, String requestID, String errorMessage, Object data) {
+                onRequestSocialPersonCompleteListener.onError(ID,"500","error_fetching_current_person_not_logged_in",null);
+            }
+        });
     }
 
     /**
@@ -260,181 +397,16 @@ public class GooglePlusSocialNetwork extends SocialNetwork implements GoogleApiC
      */
     @Override
     public void requestSocialPersons(final String[] userID, OnRequestSocialPersonsCompleteListener onRequestSocialPersonsCompleteListener) {
-        super.requestSocialPersons(userID, onRequestSocialPersonsCompleteListener);
-        Plus.PeopleApi.load(googleApiClient, userID).setResultCallback(new ResultCallback<People.LoadPeopleResult>() {
-            @Override
-            public void onResult(final People.LoadPeopleResult loadPeopleResult) {
-                if (loadPeopleResult.getStatus().getStatusCode() == CommonStatusCodes.SUCCESS) {
-                    PersonBuffer personBuffer = loadPeopleResult.getPersonBuffer();
-                    try {
-                        int count = personBuffer.getCount();
-                        SocialPerson socialPerson = new SocialPerson();
-                        final ArrayList<SocialPerson> socialPersons = new ArrayList<SocialPerson>();
-                        for (int i = 0; i < count; i++) {
-                            getSocialPerson(socialPerson, personBuffer.get(i), userID[i]);
-                            socialPersons.add(socialPerson);
-                            socialPerson = new SocialPerson();
-                        }
-                        if (mLocalListeners.get(REQUEST_GET_PERSONS) != null) {
-                            ((OnRequestSocialPersonsCompleteListener) mLocalListeners.get(REQUEST_GET_PERSONS))
-                                    .onRequestSocialPersonsSuccess(getID(), socialPersons);
-                            mLocalListeners.remove(REQUEST_GET_PERSONS);
-                        }
-                    } finally {
-                        personBuffer.close();
-                    }
-                } else {
-                    if (mLocalListeners.get(REQUEST_GET_PERSONS) != null) {
-                        mLocalListeners.get(REQUEST_GET_PERSONS)
-                                .onError(getID(), REQUEST_GET_PERSONS, "Can't get persons"
-                                        + loadPeopleResult.getStatus(), null);
-                        mLocalListeners.remove(REQUEST_GET_PERSONS);
-                    }
-                }
-            }
-        });
+        throw new SocialNetworkException("requestPostMessage isn't allowed for GooglePlusSocialNetwork");
     }
 
-    /**
-     * Request user {@link com.github.gorbin.asne.googleplus.GooglePlusPerson} by userId - detailed user data
-     * @param userId id of Google plus user
-     * @param onRequestDetailedSocialPersonCompleteListener listener for request detailed social person
-     */
     @Override
     public void requestDetailedSocialPerson(final String userId, OnRequestDetailedSocialPersonCompleteListener onRequestDetailedSocialPersonCompleteListener) {
-        super.requestDetailedSocialPerson(userId, onRequestDetailedSocialPersonCompleteListener);
-        final String user = userId == null ? "me" : userId;
-        Plus.PeopleApi.load(googleApiClient, user).setResultCallback(new ResultCallback<People.LoadPeopleResult>() {
-            @Override
-            public void onResult(final People.LoadPeopleResult loadPeopleResult) {
-                if (loadPeopleResult.getStatus().getStatusCode() == CommonStatusCodes.SUCCESS) {
-                    PersonBuffer personBuffer = loadPeopleResult.getPersonBuffer();
-                    try {
-                        int count = personBuffer.getCount();
-                        final GooglePlusPerson googlePlusPerson = new GooglePlusPerson();
-                        for (int i = 0; i < count; i++) {
-                            getDetailedSocialPerson(googlePlusPerson, personBuffer.get(i), user);
-                        }
-                        if (mLocalListeners.get(REQUEST_GET_DETAIL_PERSON) != null) {
-                            ((OnRequestDetailedSocialPersonCompleteListener) mLocalListeners.get(REQUEST_GET_DETAIL_PERSON))
-                                    .onRequestDetailedSocialPersonSuccess(getID(), googlePlusPerson);
-                            mLocalListeners.remove(REQUEST_GET_DETAIL_PERSON);
-                        }
-                    } finally {
-                        personBuffer.close();
-                    }
-                } else {
-                    if (mLocalListeners.get(REQUEST_GET_DETAIL_PERSON) != null) {
-                        mHandler.post(new Runnable() {
-                            @Override
-                            public void run() {
-                                mLocalListeners.get(REQUEST_GET_DETAIL_PERSON)
-                                        .onError(getID(), REQUEST_GET_DETAIL_PERSON, "Can't get person"
-                                                + loadPeopleResult.getStatus(), null);
-                                mLocalListeners.remove(REQUEST_GET_DETAIL_PERSON);
-                            }
-                        });
-                    }
-                }
-            }
-        });
+        throw new SocialNetworkException("requestPostMessage isn't allowed for GooglePlusSocialNetwork");
     }
 
     private void requestPerson(final String userID, OnRequestSocialPersonCompleteListener onRequestSocialPersonCompleteListener){
-        Plus.PeopleApi.load(googleApiClient, userID).setResultCallback(new ResultCallback<People.LoadPeopleResult>() {
-            @Override
-            public void onResult(final People.LoadPeopleResult loadPeopleResult) {
-                if (loadPeopleResult.getStatus().getStatusCode() == CommonStatusCodes.SUCCESS) {
-                    PersonBuffer personBuffer = loadPeopleResult.getPersonBuffer();
-                    try {
-                        int count = personBuffer.getCount();
-                        final SocialPerson socialPerson = new SocialPerson();
-                        for (int i = 0; i < count; i++) {
-                            getSocialPerson(socialPerson, personBuffer.get(i), userID);
-                        }
-                        if (mLocalListeners.get(REQUEST_GET_PERSON) != null) {
-                            ((OnRequestSocialPersonCompleteListener) mLocalListeners
-                                    .get(REQUEST_GET_PERSON))
-                                    .onRequestSocialPersonSuccess(getID(), socialPerson);
-                            mLocalListeners.remove(REQUEST_GET_PERSON);
-                        } else if (mLocalListeners.get(REQUEST_GET_CURRENT_PERSON) != null) {
-                            ((OnRequestSocialPersonCompleteListener) mLocalListeners
-                                    .get(REQUEST_GET_CURRENT_PERSON))
-                                    .onRequestSocialPersonSuccess(getID(), socialPerson);
-                            mLocalListeners.remove(REQUEST_GET_CURRENT_PERSON);
-                        }
-                    } finally {
-                        personBuffer.close();
-                    }
-                } else {
-                    if (mLocalListeners.get(REQUEST_GET_PERSON) != null) {
-                        mLocalListeners.get(REQUEST_GET_PERSON).onError(getID(), REQUEST_GET_PERSON, "Can't get person"
-                                + loadPeopleResult.getStatus(), null);
-                        mLocalListeners.remove(REQUEST_GET_PERSON);
-                    } else if (mLocalListeners.get(REQUEST_GET_CURRENT_PERSON) != null) {
-                        mLocalListeners.get(REQUEST_GET_CURRENT_PERSON).onError(getID(), REQUEST_GET_CURRENT_PERSON, "Can't get person"
-                                + loadPeopleResult.getStatus(), null);
-                        mLocalListeners.remove(REQUEST_GET_CURRENT_PERSON);
-                    }
-                }
-            }
-        });
-    }
-
-    private SocialPerson getSocialPerson(SocialPerson socialPerson, Person person, String userId){
-        socialPerson.id = person.getId();
-        socialPerson.name = person.getDisplayName();
-        if ((person.hasImage()) && (person.getImage().hasUrl())) {
-            socialPerson.avatarURL = person.getImage().getUrl().replace("?sz=50", "?sz=200");
-        }
-        socialPerson.profileURL = person.getUrl();
-        if(userId.equals("me")) {
-            //socialPerson.email = Plus.AccountApi.getAccountName(googleApiClient);
-        }
-        return socialPerson;
-    }
-
-    private GooglePlusPerson getDetailedSocialPerson(GooglePlusPerson googlePlusPerson, Person person, String userId){
-        getSocialPerson(googlePlusPerson, person, userId);
-        googlePlusPerson.aboutMe = person.getAboutMe();
-        googlePlusPerson.birthday = person.getBirthday();
-        googlePlusPerson.braggingRights = person.getBraggingRights();
-        Person.Cover cover = person.getCover();
-        if (cover != null) {
-            Person.Cover.CoverPhoto coverPhoto = cover.getCoverPhoto();
-            if (coverPhoto != null) {
-                String coverPhotoURL = coverPhoto.getUrl();
-                if(coverPhotoURL != null){
-                    googlePlusPerson.coverURL = coverPhotoURL;
-                }
-            }
-        }
-        googlePlusPerson.currentLocation = person.getCurrentLocation();
-        googlePlusPerson.gender = person.getGender();
-        googlePlusPerson.lang = person.getLanguage();
-        googlePlusPerson.nickname = person.getNickname();
-        googlePlusPerson.objectType = person.getObjectType();
-        List<Person.Organizations> organizations = person.getOrganizations();
-        if(organizations != null && organizations.size() > 0) {
-            String organizationsName = organizations.get(organizations.size()-1).getName();
-            if (organizationsName != null) {
-                googlePlusPerson.company = organizationsName;
-            }
-            String organizationsTitle = organizations.get(organizations.size()-1).getTitle();
-            if (organizationsTitle != null) {
-                googlePlusPerson.position = organizationsTitle;
-            }
-        }
-        List<Person.PlacesLived> placesLived = person.getPlacesLived();
-        if(placesLived != null && placesLived.size() > 0) {
-            String placeLivedValue = placesLived.get(placesLived.size()-1).getValue();
-            if (placeLivedValue != null) {
-                googlePlusPerson.placeLivedValue = placeLivedValue;
-            }
-        }
-        googlePlusPerson.relationshipStatus = person.getRelationshipStatus();
-        googlePlusPerson.tagline = person.getTagline();
-        return googlePlusPerson;
+        requestCurrentPerson(onRequestSocialPersonCompleteListener);
     }
 
     /**
@@ -479,19 +451,7 @@ public class GooglePlusSocialNetwork extends SocialNetwork implements GoogleApiC
      */
     @Override
     public void requestPostDialog(Bundle bundle, OnPostingCompleteListener onPostingCompleteListener) {
-        super.requestPostDialog(bundle, onPostingCompleteListener);
-        PlusShare.Builder plusShare =  new PlusShare.Builder(mActivity)
-                .setType("text/plain");
-        if(bundle != null){
-            if(bundle.containsKey(BUNDLE_MESSAGE)){
-                plusShare.setText(bundle.getString(BUNDLE_MESSAGE));
-            }
-            if(bundle.containsKey(BUNDLE_LINK)){
-                plusShare.setContentUrl(Uri.parse(bundle.getString(BUNDLE_LINK)));
-            }
-        }
-        Intent shareIntent = plusShare.getIntent();
-        mActivity.startActivityForResult(shareIntent, 0);
+        throw new SocialNetworkException("requestPostMessage isn't allowed for GooglePlusSocialNetwork");
     }
 
     /**
@@ -511,49 +471,11 @@ public class GooglePlusSocialNetwork extends SocialNetwork implements GoogleApiC
      */
     @Override
     public void requestGetFriends(OnRequestGetFriendsCompleteListener onRequestGetFriendsCompleteListener) {
-        super.requestGetFriends(onRequestGetFriendsCompleteListener);
-        final ArrayList<SocialPerson> socialPersons = new ArrayList<SocialPerson>();
-        final ArrayList<String> ids = new ArrayList<String>();
-        getAllFriends(null, socialPersons, ids);
+        throw new SocialNetworkException("requestPostMessage isn't allowed for GooglePlusSocialNetwork");
     }
 
     private void getAllFriends(String pageToken, final ArrayList<SocialPerson> socialPersons, final ArrayList<String> ids){
-        Plus.PeopleApi.loadVisible(googleApiClient, pageToken).setResultCallback(new ResultCallback<People.LoadPeopleResult>() {
-            @Override
-            public void onResult(final People.LoadPeopleResult loadPeopleResult) {
-                if (loadPeopleResult.getStatus().getStatusCode() == CommonStatusCodes.SUCCESS) {
-                    PersonBuffer personBuffer = loadPeopleResult.getPersonBuffer();
-                    try {
-                        SocialPerson socialPerson = new SocialPerson();
-                        for(Person person : personBuffer){
-                            getSocialPerson(socialPerson, person, "not me");
-                            ids.add(person.getId());
-                            socialPersons.add(socialPerson);
-                            socialPerson = new SocialPerson();
-                        }
-                        if(loadPeopleResult.getNextPageToken() != null) {
-                            getAllFriends(loadPeopleResult.getNextPageToken(), socialPersons, ids);
-                        } else {
-                            if (mLocalListeners.get(REQUEST_GET_FRIENDS) != null) {
-                                ((OnRequestGetFriendsCompleteListener) mLocalListeners.get(REQUEST_GET_FRIENDS))
-                                        .OnGetFriendsIdComplete(getID(), ids.toArray(new String[ids.size()]));
-                                ((OnRequestGetFriendsCompleteListener) mLocalListeners.get(REQUEST_GET_FRIENDS))
-                                        .OnGetFriendsComplete(getID(), socialPersons);
-                                mLocalListeners.remove(REQUEST_GET_FRIENDS);
-                            }
-                        }
-                    } finally {
-                        personBuffer.close();
-                    }
-                } else {
-                    if (mLocalListeners.get(REQUEST_GET_FRIENDS) != null) {
-                        mLocalListeners.get(REQUEST_GET_FRIENDS)
-                                .onError(getID(), REQUEST_GET_DETAIL_PERSON, "Can't get person"
-                                        + loadPeopleResult.getStatus(), null);
-                    }
-                }
-            }
-        });
+        throw new SocialNetworkException("requestPostMessage isn't allowed for GooglePlusSocialNetwork");
     }
 
     /**
@@ -578,133 +500,5 @@ public class GooglePlusSocialNetwork extends SocialNetwork implements GoogleApiC
         throw new SocialNetworkException("requestRemoveFriend isn't allowed for GooglePlusSocialNetwork");
     }
 
-    /**
-     * Overrided for Google plus
-     * @param savedInstanceState If the activity is being re-initialized after previously being shut down then this Bundle contains the data it most recently supplied in onSaveInstanceState(Bundle). Note: Otherwise it is null.
-     */
-    @Override
-    public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
 
-        mActivity = mSocialNetworkManager.getActivity();
-
-//        googleApiClient = new GoogleApiClient.Builder(mActivity)
-//                .enableAutoManage(mContext /* FragmentActivity */,
-//                        this /* OnConnectionFailedListener */)
-//                .addApi(Plus.API)
-//                .addConnectionCallbacks(this)
-//                .addOnConnectionFailedListener(this)
-//                .addScope(Plus.SCOPE_PLUS_LOGIN)
-//                .addScope(Plus.SCOPE_PLUS_PROFILE)
-//                .build();
-
-        mActivity = mSocialNetworkManager.getActivity();
-        Plus.PlusOptions plusOptions = new Plus.PlusOptions.Builder()
-                .addActivityTypes(MomentUtil.ACTIONS)
-                .build();
-        googleApiClient = new GoogleApiClient.Builder(mActivity)
-                .addApi(Plus.API,  plusOptions)
-                .addScope(Plus.SCOPE_PLUS_LOGIN)
-                .addScope(Plus.SCOPE_PLUS_PROFILE)
-                .addConnectionCallbacks(this)
-                .addOnConnectionFailedListener(this)
-                .build();
-    }
-
-    /**
-     * Overrided for Google plus
-     */
-    @Override
-    public void onStart() {
-        googleApiClient.connect();
-    }
-
-    /**
-     * Overrided for Google plus
-     */
-    @Override
-    public void onStop() {
-        if (googleApiClient.isConnected()) {
-            googleApiClient.disconnect();
-        }
-    }
-
-    /**
-     * Overrided for Google plus
-     * @param requestCode The integer request code originally supplied to startActivityForResult(), allowing you to identify who this result came from.
-     * @param resultCode The integer result code returned by the child activity through its setResult().
-     * @param data An Intent, which can return result data to the caller (various data can be attached to Intent "extras").
-     */
-    @Override
-    public void onActivityResult(int requestCode, int resultCode, Intent data) {
-        Log.d(TAG,"on activity result "+requestCode+" "+requestCode);
-        super.onActivityResult(requestCode, resultCode, data);
-        int sanitizedRequestCode = requestCode % 0x10000;
-        if (sanitizedRequestCode == REQUEST_AUTH) {
-            if (resultCode == Activity.RESULT_OK && !googleApiClient.isConnected() && !googleApiClient.isConnecting()) {
-                // This time, connect should succeed.
-                googleApiClient.connect();
-            } else if (resultCode == Activity.RESULT_CANCELED) {
-                if (mLocalListeners.get(REQUEST_LOGIN) != null) {
-                    mLocalListeners.get(REQUEST_LOGIN).onError(getID(), REQUEST_LOGIN,
-                            "canceled", null);
-                }
-            }
-        }
-    }
-
-    /**
-     * After calling connect(), this method will be invoked asynchronously when the connect request has successfully completed.
-     * @param bundle Bundle of data provided to clients by Google Play services. May be null if no content is provided by the service.
-     */
-    @Override
-    public void onConnected(Bundle bundle) {
-        if (mConnectRequested) {
-            if (mLocalListeners.get(REQUEST_LOGIN) != null) {
-                mSharedPreferences.edit().putBoolean(SAVE_STATE_KEY_IS_CONNECTED, true).commit();
-                ((OnLoginCompleteListener) mLocalListeners.get(REQUEST_LOGIN)).onLoginSuccess(getID());
-                return;
-            }
-            if (mLocalListeners.get(REQUEST_LOGIN) != null) {
-                mLocalListeners.get(REQUEST_LOGIN).onError(getID(), REQUEST_LOGIN,
-                        "get person == null", null);
-            }
-        }
-        mConnectRequested = false;
-    }
-
-    /**
-     * Called when the client is temporarily in a disconnected state.
-     * @param i The reason for the disconnection. Defined by constants CAUSE_*.
-     */
-    @Override
-    public void onConnectionSuspended(int i) {
-        if (mLocalListeners.get(REQUEST_LOGIN) != null) {
-            mLocalListeners.get(REQUEST_LOGIN).onError(getID(), REQUEST_LOGIN,
-                    "get person == null", null);
-        }
-        mConnectRequested = false;
-    }
-
-    /**
-     * Called when the client is disconnected.
-     */
-    public void onDisconnected() {
-        mConnectRequested = false;
-    }
-
-    /**
-     * Called when there was an error connecting the client to the service.
-     * @param connectionResult A ConnectionResult that can be used for resolving the error, and deciding what sort of error occurred.
-     */
-    @Override
-    public void onConnectionFailed(ConnectionResult connectionResult) {
-        mConnectionResult = connectionResult;
-        if (mConnectRequested && mLocalListeners.get(REQUEST_LOGIN) != null) {
-            mLocalListeners.get(REQUEST_LOGIN).onError(getID(), REQUEST_LOGIN,
-                    "error: " + connectionResult.getErrorCode(), null);
-        }
-
-        mConnectRequested = false;
-    }
 }

@@ -38,6 +38,7 @@ import com.github.gorbin.asne.core.SocialNetwork;
 import com.github.gorbin.asne.core.SocialNetworkException;
 import com.github.gorbin.asne.core.listener.OnCheckIsFriendCompleteListener;
 import com.github.gorbin.asne.core.listener.OnLoginCompleteListener;
+import com.github.gorbin.asne.core.listener.OnLogoutCompleteListener;
 import com.github.gorbin.asne.core.listener.OnPostingCompleteListener;
 import com.github.gorbin.asne.core.listener.OnRequestAccessTokenCompleteListener;
 import com.github.gorbin.asne.core.listener.OnRequestAddFriendCompleteListener;
@@ -254,8 +255,10 @@ public class VkSocialNetwork extends SocialNetwork {
      * Logout from VK social network
      */
     @Override
-    public void logout() {
+    public void logout(OnLogoutCompleteListener completeListener) {
+
         VKSdk.logout();
+        if (completeListener != null) completeListener.onLogoutSuccess(ID);
     }
 
     /**
