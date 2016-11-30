@@ -28,13 +28,13 @@ import android.os.Bundle;
 import android.support.v4.app.Fragment;
 import android.text.TextUtils;
 
-import com.github.gorbin.asne.core.AccessToken;
 import com.github.gorbin.asne.core.OAuthActivity;
 import com.github.gorbin.asne.core.OAuthSocialNetwork;
 import com.github.gorbin.asne.core.SocialNetworkAsyncTask;
 import com.github.gorbin.asne.core.SocialNetworkException;
 import com.github.gorbin.asne.core.listener.OnCheckIsFriendCompleteListener;
 import com.github.gorbin.asne.core.listener.OnLoginCompleteListener;
+import com.github.gorbin.asne.core.listener.OnLogoutCompleteListener;
 import com.github.gorbin.asne.core.listener.OnPostingCompleteListener;
 import com.github.gorbin.asne.core.listener.OnRequestAccessTokenCompleteListener;
 import com.github.gorbin.asne.core.listener.OnRequestAddFriendCompleteListener;
@@ -58,6 +58,7 @@ import twitter4j.Twitter;
 import twitter4j.TwitterException;
 import twitter4j.TwitterFactory;
 import twitter4j.User;
+import twitter4j.auth.AccessToken;
 import twitter4j.auth.RequestToken;
 import twitter4j.conf.ConfigurationBuilder;
 
@@ -77,36 +78,14 @@ public class TwitterSocialNetwork extends OAuthSocialNetwork {
     // max 16 bit to use in startActivityForResult
     private static final int REQUEST_AUTH = UUID.randomUUID().hashCode() & 0xFFFF;
 //    private final String TWITTER_CALLBACK_URL = "oauth://ASNE";
-    private final String mConsumerKey;
-    private final String mConsumerSecret;
-    private String mRedirectURL;
+    private final String fConsumerKey;
+    private final String fConsumerSecret;
+    private String fRedirectURL;
     private Twitter mTwitter;
     private RequestToken mRequestToken;
 
     public TwitterSocialNetwork(Fragment fragment, Context context, String consumerKey, String consumerSecret, String redirectURL) {
         super(fragment,context);
-
-        mConsumerKey = consumerKey;
-        mConsumerSecret = consumerSecret;
-        mRedirectURL = redirectURL;
-
-
-        if (TextUtils.isEmpty(mConsumerKey) || TextUtils.isEmpty(mConsumerSecret)) {
-            throw new IllegalArgumentException("consumerKey and consumerSecret are invalid");
-        }
-        /*
-        *
-        * No authentication challenges found
-        * Relevant discussions can be found on the Internet at:
-        * http://www.google.co.jp/search?q=8e063946 or
-        * http://www.google.co.jp/search?q=ef59cf9f
-        *
-        * */
-        initTwitterClient();
-    }
-
-    public TwitterSocialNetwork(Fragment fragment, Context context, String consumerKey, String consumerSecret, String redirectURL) {
-        super(fragment, context);
 
         fConsumerKey = consumerKey;
         fConsumerSecret = consumerSecret;
@@ -129,8 +108,8 @@ public class TwitterSocialNetwork extends OAuthSocialNetwork {
 
     private void initTwitterClient() {
         ConfigurationBuilder builder = new ConfigurationBuilder();
-        builder.setOAuthConsumerKey(mConsumerKey);
-        builder.setOAuthConsumerSecret(mConsumerSecret);
+        builder.setOAuthConsumerKey(fConsumerKey);
+        builder.setOAuthConsumerSecret(fConsumerSecret);
 
         String accessToken = mSharedPreferences.getString(SAVE_STATE_KEY_OAUTH_TOKEN, null);
         String accessTokenSecret = mSharedPreferences.getString(SAVE_STATE_KEY_OAUTH_SECRET, null);
@@ -140,7 +119,7 @@ public class TwitterSocialNetwork extends OAuthSocialNetwork {
         if (TextUtils.isEmpty(accessToken) && TextUtils.isEmpty(accessTokenSecret)) {
             mTwitter = factory.getInstance();
         } else {
-            mTwitter = factory.getInstance(new twitter4j.auth.AccessToken(accessToken, accessTokenSecret));
+            mTwitter = factory.getInstance(new AccessToken(accessToken, accessTokenSecret));
         }
     }
 
@@ -169,7 +148,7 @@ public class TwitterSocialNetwork extends OAuthSocialNetwork {
      * Logout from Twitter social network
      */
     @Override
-    public void logout() {
+    public void logout(OnLogoutCompleteListener completeListener) {
         mSharedPreferences.edit()
                 .remove(SAVE_STATE_KEY_OAUTH_TOKEN)
                 .remove(SAVE_STATE_KEY_OAUTH_SECRET)
@@ -178,6 +157,7 @@ public class TwitterSocialNetwork extends OAuthSocialNetwork {
 
         mTwitter = null;
         initTwitterClient();
+        if (completeListener != null) completeListener.onLogoutSuccess(ID);
     }
 
     /**
@@ -194,8 +174,8 @@ public class TwitterSocialNetwork extends OAuthSocialNetwork {
      * @return {@link com.github.gorbin.asne.core.AccessToken}
      */
     @Override
-    public AccessToken getAccessToken() {
-        return new AccessToken(
+    public com.github.gorbin.asne.core.AccessToken getAccessToken() {
+        return new com.github.gorbin.asne.core.AccessToken(
                 mSharedPreferences.getString(SAVE_STATE_KEY_OAUTH_TOKEN, null),
                 mSharedPreferences.getString(SAVE_STATE_KEY_OAUTH_SECRET, null)
         );
@@ -209,7 +189,7 @@ public class TwitterSocialNetwork extends OAuthSocialNetwork {
     public void requestAccessToken(OnRequestAccessTokenCompleteListener onRequestAccessTokenCompleteListener) {
         super.requestAccessToken(onRequestAccessTokenCompleteListener);
         ((OnRequestAccessTokenCompleteListener) mLocalListeners.get(REQUEST_ACCESS_TOKEN))
-                .onRequestAccessTokenComplete(getID(), new AccessToken(
+                .onRequestAccessTokenComplete(getID(), new com.github.gorbin.asne.core.AccessToken(
                         mSharedPreferences.getString(SAVE_STATE_KEY_OAUTH_TOKEN, null),
                         mSharedPreferences.getString(SAVE_STATE_KEY_OAUTH_SECRET, null)
                 ));
@@ -446,13 +426,13 @@ public class TwitterSocialNetwork extends OAuthSocialNetwork {
      */
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
-        int sanitizedRequestCode = requestCode & 0xFFFF;
+        int sanitizedRequestCode = requestCode % 0x10000;
         if (sanitizedRequestCode != REQUEST_AUTH) return;
         super.onActivityResult(requestCode, resultCode, data);
 
         Uri uri = data != null ? data.getData() : null;
 
-        if (uri != null && uri.toString().startsWith(mRedirectURL)) {
+        if (uri != null && uri.toString().startsWith(fRedirectURL)) {
             String verifier = uri.getQueryParameter(URL_TWITTER_OAUTH_VERIFIER);
 
             RequestLogin2AsyncTask requestLogin2AsyncTask = new RequestLogin2AsyncTask();
@@ -494,7 +474,7 @@ public class TwitterSocialNetwork extends OAuthSocialNetwork {
             Bundle result = new Bundle();
 
             try {
-                mRequestToken = mTwitter.getOAuthRequestToken(mRedirectURL);
+                mRequestToken = mTwitter.getOAuthRequestToken(fRedirectURL);
                 Uri oauthLoginURL = Uri.parse(mRequestToken.getAuthenticationURL() + "&force_login=true");
 
                 result.putString(RESULT_OAUTH_LOGIN, oauthLoginURL.toString());
@@ -515,17 +495,10 @@ public class TwitterSocialNetwork extends OAuthSocialNetwork {
                             .putExtra(OAuthActivity.PARAM_CALLBACK, fRedirectURL)
                             .putExtra(OAuthActivity.PARAM_URL_TO_LOAD, result.getString(RESULT_OAUTH_LOGIN));
 
-<<<<<<< HEAD
                     mSocialNetworkManager.getActivity().startActivityForResult(intent, REQUEST_AUTH);
                 }
             }
             catch(Exception e){
-=======
-            if (result.containsKey(RESULT_OAUTH_LOGIN)) {
-                Intent intent = new Intent(mSocialNetworkManager.getActivity(), OAuthActivity.class)
-                        .putExtra(OAuthActivity.PARAM_CALLBACK, mRedirectURL)
-                        .putExtra(OAuthActivity.PARAM_URL_TO_LOAD, result.getString(RESULT_OAUTH_LOGIN));
->>>>>>> 91bf48d9fc2560400bc6210eb95a8eb68a76920f
 
             }
         }
@@ -545,7 +518,7 @@ public class TwitterSocialNetwork extends OAuthSocialNetwork {
             Bundle result = new Bundle();
 
             try {
-                twitter4j.auth.AccessToken accessToken = mTwitter.getOAuthAccessToken(mRequestToken, verifier);
+                AccessToken accessToken = mTwitter.getOAuthAccessToken(mRequestToken, verifier);
 
                 result.putString(RESULT_TOKEN, accessToken.getToken());
                 result.putString(RESULT_SECRET, accessToken.getTokenSecret());
@@ -818,10 +791,10 @@ public class TwitterSocialNetwork extends OAuthSocialNetwork {
                     result.getStringArray(RESULT_GET_FRIENDS_ID))) return;
 
             ((OnRequestGetFriendsCompleteListener) mLocalListeners.get(REQUEST_GET_FRIENDS))
-                    .onGetFriendsIdComplete(getID(), result.getStringArray(RESULT_GET_FRIENDS_ID));
+                    .OnGetFriendsIdComplete(getID(), result.getStringArray(RESULT_GET_FRIENDS_ID));
             ArrayList<SocialPerson> socialPersons = result.getParcelableArrayList(RESULT_GET_FRIENDS);
             ((OnRequestGetFriendsCompleteListener) mLocalListeners.get(REQUEST_GET_FRIENDS))
-                    .onGetFriendsComplete(getID(), socialPersons);
+                    .OnGetFriendsComplete(getID(), socialPersons);
         }
     }
 
